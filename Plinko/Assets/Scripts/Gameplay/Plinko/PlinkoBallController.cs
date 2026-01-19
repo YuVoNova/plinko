@@ -7,25 +7,26 @@ namespace Gameplay
 {
     public class PlinkoBall : MonoBehaviour, IPoolable
     {
+        private const float MAX_LIFETIME = 7f;
+
+        private Rigidbody2D _rigidbody;
+        private TrailRenderer _trailRenderer;
+        
+        // TODO -> Move hard-coded values to an SO Config File
         private float _baseBounceValue = 0.6f;
         private float _bounceVariation = 0.1f;
         private float _angularDrag = 0.5f;
         private float _maxVelocity = 15f;
-
-        private Rigidbody2D _rigidbody;
-        private CircleCollider2D _collider;
-        private TrailRenderer _trailRenderer;
         
         private bool _isActive;
         private float _spawnTime;
-        private const float MAX_LIFETIME = 10f;
 
         public Action<PlinkoBall, int> OnBucketEntered;
+        public Action<PlinkoBall> OnDespawnedWithoutLanding;
 
         private void Awake()
         {
             _rigidbody = GetComponent<Rigidbody2D>();
-            _collider = GetComponent<CircleCollider2D>();
             _trailRenderer = GetComponent<TrailRenderer>();
 
             SetupPhysics();
@@ -70,14 +71,20 @@ namespace Gameplay
         {
             if (!_isActive)
                 return;
-
-            if (!other.CompareTag("Bucket"))
-                return;
             
-            PlinkoBucket bucket = other.GetComponent<PlinkoBucket>();
-            if (bucket != null)
+            if (other.CompareTag("Bucket"))
             {
-                OnBucketEntered?.Invoke(this, bucket.BucketIndex);
+                PlinkoBucket bucket = other.GetComponent<PlinkoBucket>();
+                if (bucket != null)
+                {
+                    OnBucketEntered?.Invoke(this, bucket.BucketIndex);
+                }
+            }
+            else if (other.CompareTag("OutOfBounds"))
+            {
+                Debug.LogWarning("[BALL] Fell out of bounds, recycling");
+                OnDespawnedWithoutLanding?.Invoke(this);
+                OnDespawn();
             }
         }
 
@@ -109,6 +116,7 @@ namespace Gameplay
                 _trailRenderer.enabled = false;
 
             OnBucketEntered = null;
+            OnDespawnedWithoutLanding = null;
             gameObject.SetActive(false);
         }
 

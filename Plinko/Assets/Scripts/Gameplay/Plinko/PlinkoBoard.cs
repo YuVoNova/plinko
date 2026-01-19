@@ -9,6 +9,7 @@ namespace Gameplay
     {
         // Peg/Ball Size Ratio: 5/8 (0.625)
         // X-Y Distance Between Pegs: Ball Size x 2
+        // TODO -> Move hard-coded values to an SO Config File
         private const float BALL_SIZE = 0.2f;
         private const int INITIAL_PEG_AMOUNT = 3;
         private const int PEG_ROWS = 10;
@@ -77,7 +78,7 @@ namespace Gameplay
         
         public Vector2 GetSpawnPosition()
         {
-            return new Vector2(0, _boardOffset.y + 1);
+            return new Vector2(0, _boardOffset.y + _pegDistanceY * 1.5f);
         }
 
         private void SetOffsets()
