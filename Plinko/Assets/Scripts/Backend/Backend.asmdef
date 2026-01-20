@@ -1,3 +1,16 @@
 {
-	"name": "Backend"
+    "name": "Backend",
+    "rootNamespace": "",
+    "references": [
+        "GUID:1e6ea08b4fb7d294a91465ceda01d63c"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
 }

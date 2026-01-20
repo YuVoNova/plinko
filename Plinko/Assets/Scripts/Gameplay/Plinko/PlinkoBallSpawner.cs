@@ -11,6 +11,7 @@ namespace Gameplay
         [SerializeField] private PlinkoBoard board;
         [SerializeField] private Transform spawnPoint;
         
+        // TODO -> Move hard-coded values to an SO Config File
         private float _minSpawnInterval = 0.1f;
         private float _spawnPositionVariance = 0f;
         private int _maxSimultaneousBalls = 30;
@@ -21,8 +22,11 @@ namespace Gameplay
         private Coroutine _spawnCoroutine;
         
         public Action<int> OnBallLanded;
+        public Action OnBallSpawned;
+        public Action OnBallRefunded;
         
         public bool IsSpawning => _spawnCoroutine != null;
+        public int ActiveBallCount => _currentActiveBalls;
         
         public void StartSpawning()
         {
@@ -53,6 +57,11 @@ namespace Gameplay
             _baseSpawnPosition = position;
             spawnPoint.position = _baseSpawnPosition;
         }
+        
+        public bool HasActiveBalls()
+        {
+            return _currentActiveBalls > 0;
+        }
 
         private bool TrySpawnBall()
         {
@@ -76,15 +85,21 @@ namespace Gameplay
             if (ball != null)
             {
                 ball.OnBucketEntered += HandleBallLanded;
+                ball.OnDespawnedWithoutLanding += HandleBallOutOfBounds;
                 ball.EnableTrailRenderer(true);
                 _currentActiveBalls++;
                 _lastSpawnTime = Time.time;
+                
+                // Notify that ball was spawned (client decrements here)
+                OnBallSpawned?.Invoke();  // ← NEW
+
             }
         }
         
         private void HandleBallLanded(PlinkoBall ball, int bucketIndex)
         {
             ball.OnBucketEntered -= HandleBallLanded;
+            ball.OnDespawnedWithoutLanding -= HandleBallOutOfBounds;
             _currentActiveBalls--;
             
             OnBallLanded?.Invoke(bucketIndex);
@@ -93,6 +108,20 @@ namespace Gameplay
             
             PlinkoBucket bucket = board.GetBucket(bucketIndex);
             bucket?.TriggerHitEffect();
+        }
+        
+        private void HandleBallOutOfBounds(PlinkoBall ball)
+        {
+            ball.OnBucketEntered -= HandleBallLanded;
+            ball.OnDespawnedWithoutLanding -= HandleBallOutOfBounds;
+            _currentActiveBalls--;
+    
+            // Notify game manager to refund the ball
+            OnBallRefunded?.Invoke();
+    
+            ballPool.ReturnBall(ball);
+    
+            Debug.LogWarning($"[SPAWNER] Ball out of bounds, refunded (active: {_currentActiveBalls})");
         }
         
         private IEnumerator SpawnContinuously()
