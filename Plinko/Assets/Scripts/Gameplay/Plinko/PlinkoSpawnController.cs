@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Gameplay
 {
-    public class SpawnController
+    public class PlinkoSpawnController
     {
         public Action OnBallSpawned;
         public Action<int> OnBallCountChanged;
@@ -22,7 +22,7 @@ namespace Gameplay
         public bool HasActiveBalls => _spawner.HasActiveBalls();
         public int ActiveBallCount => _spawner.ActiveBallCount;
 
-        public SpawnController(PlinkoBallSpawner spawner)
+        public PlinkoSpawnController(PlinkoBallSpawner spawner)
         {
             _spawner = spawner;
         }

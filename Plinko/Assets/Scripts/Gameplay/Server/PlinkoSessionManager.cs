@@ -11,13 +11,13 @@ namespace Gameplay
         public Action<float> OnTimerUpdated;    // Seconds until reset.
         public Action OnResetNeeded;
         
-        private readonly MockServerService _backend;
+        private readonly IBackendService _backend;
         private readonly float _checkInterval;
         
         private Task _sessionTimerTask;
         private CancellationTokenSource _sessionCancellation;
         
-        public PlinkoSessionManager(MockServerService backend, float checkInterval = 1f)
+        public PlinkoSessionManager(IBackendService backend, float checkInterval = 1f)
         {
             _backend = backend;
             _checkInterval = checkInterval;
