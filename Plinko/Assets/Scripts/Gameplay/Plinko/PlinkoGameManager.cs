@@ -38,6 +38,11 @@ namespace Gameplay
 
         #region Unity Lifecycle
 
+        private void Awake()
+        {
+            SetupApplicationSettings();
+        }
+
         private async void Start()
         {
             await InitializeGame();
@@ -135,6 +140,19 @@ namespace Gameplay
 
             inputHandler.OnSpawnPressed += HandleSpawnPressed;
             inputHandler.OnSpawnReleased += HandleSpawnReleased;
+        }
+
+        private void SetupApplicationSettings()
+        {
+            #if PLATFORM_ANDROID
+            
+            int refreshRate = (int)Screen.currentResolution.refreshRateRatio.value;
+
+            QualitySettings.vSyncCount = 0;
+
+            Application.targetFrameRate = refreshRate;
+            
+            #endif
         }
 
         #endregion
@@ -312,9 +330,9 @@ namespace Gameplay
             }
 
             _levelController.Initialize(response.CurrentLevel);
-            
+
             LevelLoadResult levelResult = await _levelController.LoadLevel(response.CurrentLevel);
-            
+
             _spawnController.Initialize(response.BallCount, levelResult.BallAmount);
             _spawnController.ResetSpawner();
 
@@ -363,7 +381,8 @@ namespace Gameplay
                 totalWaitTime += checkInterval;
 
                 if (totalWaitTime % 1000 == 0)
-                    Debug.Log($"[GAME] Waiting... {_spawnController.ActiveBallCount} balls active. ({totalWaitTime}ms)");
+                    Debug.Log(
+                        $"[GAME] Waiting... {_spawnController.ActiveBallCount} balls active. ({totalWaitTime}ms)");
             }
 
             if (_spawnController.HasActiveBalls)
