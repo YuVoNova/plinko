@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
 using Data;
@@ -198,7 +199,7 @@ namespace Backend
             };
         }
 
-        public async Task<ResetResponse> ResetGame()
+        public async Task<ResetResponse> ResetGame(bool isFullReset)
         {
             await SimulateNetworkDelay();
 
@@ -206,8 +207,9 @@ namespace Backend
             {
                 return new ResetResponse { Success = false, Message = "No session" };
             }
-
-            float preservedWallet = _currentSession.WalletBalance;
+            
+            if (isFullReset)
+                _currentSession.WalletBalance = 0f;
 
             LevelConfigServerData firstLevelConfig = _levelDatabase.GetConfig(1);
             _currentSession.CurrentBallCount = firstLevelConfig.BallAmount;
@@ -215,7 +217,7 @@ namespace Backend
             _currentSession.TotalBallsDroppedThisLevel = 0;
             _currentSession.LastResetTime = DateTime.UtcNow;
 
-            string message = $"Game reset. Wallet preserved: {preservedWallet:F2}";
+            string message = isFullReset ? "Full reset. Wallet cleared." : $"Game reset. Wallet preserved: {_currentSession.WalletBalance:F2}";
             LogMessage(message);
 
             return new ResetResponse
@@ -223,9 +225,61 @@ namespace Backend
                 Success = true,
                 BallCount = _currentSession.CurrentBallCount,
                 CurrentLevel = _currentSession.CurrentLevel,
-                WalletBalance = preservedWallet,
+                WalletBalance = _currentSession.WalletBalance,
                 Message = message
             };
+        }
+        
+        public async Task<ResetResponse> FullReset()
+        {
+            await SimulateNetworkDelay();
+
+            if (_currentSession == null)
+                return new ResetResponse { Success = false, Message = "No session" };
+
+            // Reset wallet to 0
+            _currentSession.WalletBalance = 0f;
+
+            LevelConfigServerData firstLevelConfig = _levelDatabase.GetConfig(1);
+            _currentSession.CurrentBallCount = firstLevelConfig.BallAmount;
+            _currentSession.CurrentLevel = firstLevelConfig.Level;
+            _currentSession.TotalBallsDroppedThisLevel = 0;
+            _currentSession.LastResetTime = DateTime.UtcNow;
+
+            LogMessage("Full reset. Wallet cleared.");
+
+            return new ResetResponse
+            {
+                Success = true,
+                BallCount = _currentSession.CurrentBallCount,
+                CurrentLevel = _currentSession.CurrentLevel,
+                WalletBalance = 0f,
+                Message = "Full reset complete"
+            };
+        }
+
+        public async Task<List<BallResultData>> GetBatchResults(BallLandData[] ballLandDataArray)
+        {
+            await SimulateNetworkDelay();
+
+            if (_currentSession == null)
+                return new List<BallResultData>();
+
+            LevelConfigServerData config = _levelDatabase.GetConfig(_currentSession.CurrentLevel);
+            List<BallResultData> breakdown = new List<BallResultData>();
+
+            foreach (BallLandData ballLandData in ballLandDataArray)
+            {
+                if (ballLandData.BucketIndex < 0 || ballLandData.BucketIndex >= config.Multipliers.Length)
+                    continue;
+
+                float multiplier = config.Multipliers[ballLandData.BucketIndex];
+                float reward = config.BaseRewardPerBall * multiplier;
+
+                breakdown.Add(new BallResultData(ballLandData.DropNumber, ballLandData.BucketIndex, multiplier, reward));
+            }
+
+            return breakdown;
         }
 
         private async Task SimulateNetworkDelay()

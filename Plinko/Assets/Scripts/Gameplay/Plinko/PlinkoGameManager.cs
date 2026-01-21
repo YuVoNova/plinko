@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 using System.Threading.Tasks;
 using Backend;
 using Core;
+using Data;
 
 namespace Gameplay
 {
@@ -15,6 +17,7 @@ namespace Gameplay
         public Action<float> OnWalletUpdated;
         public Action<float> OnTimerUpdated;
         public Action<GameState, GameState> OnStateChanged; // Old State, New State
+        public Action<BallResultData> OnBallResult;
 
         [SerializeField] private PlinkoBoard board;
         [SerializeField] private PlinkoBallSpawner spawner;
@@ -30,6 +33,10 @@ namespace Gameplay
         private int _ballAmount;
         private int _ballsDroppedThisLevel;
         private bool _isLevelingUp = false;
+        private float[] _currentLevelMultipliers;
+        
+        public int CurrentLevel => _currentLevel;
+        public int CurrentBallCount => _currentBallCount;
 
         #region Unity Functions
 
@@ -62,6 +69,9 @@ namespace Gameplay
             {
                 _batchProcessor.FlushBatch();
                 _batchProcessor.OnBatchProcessed -= HandleBatchProcessed;
+                _batchProcessor.OnBatchStarted -= HandleBatchStarted;
+                _batchProcessor.OnBatchCompleted -= HandleBatchCompleted;
+                _batchProcessor.OnBallResult -= HandleBallRewardsCalculated;
             }
 
             if (_sessionManager != null)
@@ -114,8 +124,11 @@ namespace Gameplay
 
         private void InitializeBatchProcessor()
         {
-            _batchProcessor = new PlinkoBatchProcessor(backend);
+            _batchProcessor = new PlinkoBatchProcessor(backend, 0);
             _batchProcessor.OnBatchProcessed += HandleBatchProcessed;
+            _batchProcessor.OnBatchStarted += HandleBatchStarted;
+            _batchProcessor.OnBatchCompleted += HandleBatchCompleted;
+            _batchProcessor.OnBallResult += HandleBallRewardsCalculated;
         }
 
         private void InitializeSessionManager()
@@ -150,6 +163,7 @@ namespace Gameplay
             if (response.Success && response.LevelConfig != null)
             {
                 _ballAmount = response.BallAmount;
+                _currentLevelMultipliers = response.LevelConfig.bucketMultipliers;
 
                 board.ConfigureBucketsFromServer(response.LevelConfig);
 
@@ -261,6 +275,29 @@ namespace Gameplay
             Debug.Log($"[GAME] Ball refunded (out of bounds) | Remaining: {_currentBallCount} | Progress: {_ballsDroppedThisLevel}/{_ballAmount}");
 
             OnBallCountChanged?.Invoke(_currentBallCount);
+        }
+        
+        private void HandleBatchStarted()
+        {
+            ChangeState(GameState.ProcessingBatch);
+        }
+
+        private void HandleBatchCompleted()
+        {
+            if (_isLevelingUp)
+                ChangeState(GameState.LevelTransition);
+            else if (spawner.IsSpawning)
+                ChangeState(GameState.Playing);
+            else
+                ChangeState(GameState.Ready);
+        }
+
+        private void HandleBallRewardsCalculated(List<BallResultData> rewards)
+        {
+            foreach (BallResultData reward in rewards)
+            {
+                OnBallResult?.Invoke(reward);
+            }
         }
 
         private void HandleBatchProcessed(float walletBalance, float rewardEarned)
@@ -374,8 +411,21 @@ namespace Gameplay
         {
             await PerformReset();
         }
+        
+        public async void ManualSessionReset()
+        {
+            Debug.Log("[GAME] Manual session reset triggered.");
+            await PerformReset();
+        }
 
-        private async Task PerformReset()
+        public async void ManualFullReset()
+        {
+            Debug.Log("[GAME] Manual full reset triggered.");
+    
+            await PerformReset(true);
+        }
+
+        private async Task PerformReset(bool isFullReset = false)
         {
             ChangeState(GameState.Resetting);
 
@@ -385,10 +435,11 @@ namespace Gameplay
             await WaitForActiveBalls();
 
             _batchProcessor.FlushBatch();
+            _batchProcessor.Reset();
 
             _sessionManager.StopMonitoring();
 
-            ResetResponse response = await backend.ResetGame();
+            ResetResponse response = await backend.ResetGame(isFullReset);
 
             if (!response.Success)
             {
@@ -411,13 +462,10 @@ namespace Gameplay
 
             ChangeState(GameState.Ready);
 
-            Debug.Log($"[GAME] Reset complete. Wallet preserved: {response.WalletBalance:F2}");
-        }
-
-        public async void ManualReset()
-        {
-            Debug.Log("[GAME] Manual reset triggered.");
-            await PerformReset();
+            if (isFullReset)
+                Debug.Log("[GAME] Full reset complete.");
+            else
+                Debug.Log($"[GAME] Reset complete. Wallet preserved: {response.WalletBalance:F2}");
         }
 
         #endregion
