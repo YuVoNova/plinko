@@ -248,14 +248,13 @@ GameObject:
   - component: {fileID: 66601596}
   - component: {fileID: 66601599}
   - component: {fileID: 66601598}
-  - component: {fileID: 66601597}
   m_Layer: 5
-  m_Name: BatchIndicator
+  m_Name: IndicatorObject
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &66601596
 RectTransform:
   m_ObjectHideFlags: 0
@@ -263,31 +262,18 @@ RectTransform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 66601595}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 1296164016}
+  m_Father: {fileID: 1369277254}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 1}
   m_AnchorMax: {x: 0.5, y: 1}
-  m_AnchoredPosition: {x: 0, y: -200}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 100, y: 100}
   m_Pivot: {x: 0.5, y: 1}
---- !u!114 &66601597
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 66601595}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ec856bf03f04467e900c9c273e9a36ea, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: UI::UI.BatchProcessingIndicator
-  indicatorObject: {fileID: 66601595}
 --- !u!114 &66601598
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -964,7 +950,7 @@ MonoBehaviour:
   levelUpDisplay: {fileID: 705343296}
   historyDisplay: {fileID: 937242061}
   devToolsDisplay: {fileID: 1342091906}
-  batchIndicator: {fileID: 66601597}
+  batchIndicator: {fileID: 1369277255}
   gameManager: {fileID: 798646356}
 --- !u!4 &384931984
 Transform:
@@ -3857,7 +3843,7 @@ RectTransform:
   - {fileID: 1587614527}
   - {fileID: 1662466156}
   - {fileID: 1342091901}
-  - {fileID: 66601596}
+  - {fileID: 1369277254}
   - {fileID: 1583979518}
   - {fileID: 937242060}
   - {fileID: 705343295}
@@ -4127,6 +4113,56 @@ MonoBehaviour:
   m_EditorClassIdentifier: UI::UI.DevToolsDisplay
   stateText: {fileID: 108641751}
   addBalanceAmount: 100
+--- !u!1 &1369277253
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1369277254}
+  - component: {fileID: 1369277255}
+  m_Layer: 5
+  m_Name: BatchProcessingIndicatorDisplay
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &1369277254
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1369277253}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 66601596}
+  m_Father: {fileID: 1296164016}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0.5, y: 1}
+  m_AnchorMax: {x: 0.5, y: 1}
+  m_AnchoredPosition: {x: 0, y: -200}
+  m_SizeDelta: {x: 100, y: 100}
+  m_Pivot: {x: 0.5, y: 1}
+--- !u!114 &1369277255
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1369277253}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ec856bf03f04467e900c9c273e9a36ea, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UI::UI.BatchProcessingIndicator
+  indicatorObject: {fileID: 66601595}
 --- !u!1 &1402574880
 GameObject:
   m_ObjectHideFlags: 0

@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using System.Collections.Generic;
+using UnityEngine;
 using Data;
 
 namespace UI
@@ -28,6 +29,16 @@ namespace UI
             
             lastChild.SetAsFirstSibling();
             lastChild.GetComponent<HistoryEntryUI>().SetData(data);
+        }
+        
+        public void LoadHistory(List<BallResultData> history)
+        {
+            ClearHistory();
+    
+            foreach (BallResultData entry in history)
+            {
+                AddEntry(entry);
+            }
         }
         
         public void ClearHistory()

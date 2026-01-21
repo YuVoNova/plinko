@@ -1,4 +1,5 @@
-﻿using Data;
+﻿using System.Collections.Generic;
+using Data;
 
 namespace Backend
 {
@@ -8,8 +9,9 @@ namespace Backend
         public int BallCount;
         public int CurrentLevel;
         public float WalletBalance;
+        public float TimeUntilReset;
+        public List<BallResultData> RewardHistory;
         public string Message;
-        public long ServerTime;
     }
     
     public class LevelConfigResponse
@@ -52,6 +54,7 @@ namespace Backend
         public int BallCount;
         public int CurrentLevel;
         public float WalletBalance;
+        public float TimeUntilReset;
         public string Message;
     }
     
