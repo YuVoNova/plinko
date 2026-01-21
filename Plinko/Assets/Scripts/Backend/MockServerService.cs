@@ -9,12 +9,14 @@ namespace Backend
 {
     public class MockServerService : MonoBehaviour
     {
+        private const string PLAYER_DATA_KEY = "PlinkoPlayerData";
         private const int MIN_LATENCY_MS = 50;
         private const int MAX_LATENCY_MS = 150;
 
         [SerializeField] private bool enableLogMessages = true;
 
         private PlayerSession _currentSession;
+        private PlayerData _playerData;
         private LevelConfigDatabase _levelDatabase;
         private SessionValidator _sessionValidator;
         private RewardValidator _rewardValidator;
@@ -37,17 +39,41 @@ namespace Backend
         {
             await SimulateNetworkDelay();
 
-            _currentSession = new PlayerSession();
+            _playerData = LoadPlayerData();
+            
+            float timeUntilReset = _sessionValidator.GetTimeUntilReset(_playerData.GetSessionStartTime());
+            bool needsSessionReset = timeUntilReset <= 0;
 
-            LogMessage($"New session created: {_currentSession.SessionId}");
+            if (needsSessionReset)
+            {
+                _playerData.ResetSession();
+                SavePlayerData();
+                timeUntilReset = SessionValidator.RESET_INTERVAL_SECONDS;
+            }
+            
+            LevelConfigServerData firstLevelConfig = _levelDatabase.GetConfig(1);
+    
+            _currentSession = new PlayerSession
+            {
+                SessionId = Guid.NewGuid().ToString(),
+                CurrentLevel = 1,
+                CurrentBallCount = firstLevelConfig.BallAmount,
+                TotalBallsDroppedThisLevel = 0,
+                LastBatchTime = DateTime.UtcNow,
+                TotalBatchesProcessed = 0,
+                PlayerData = _playerData
+            };
+
+            LogMessage($"Game initialized. Wallet: {_playerData.WalletBalance:F2}, Timer: {timeUntilReset:F0}s remaining");
 
             return new InitResponse
             {
                 Success = true,
                 BallCount = _currentSession.CurrentBallCount,
                 CurrentLevel = _currentSession.CurrentLevel,
-                WalletBalance = _currentSession.WalletBalance,
-                ServerTime = GetServerTimestamp(),
+                WalletBalance = _playerData.WalletBalance,
+                TimeUntilReset = timeUntilReset,
+                RewardHistory = new List<BallResultData>(_playerData.RewardHistory),
                 Message = "Game initialized"
             };
         }
@@ -97,9 +123,10 @@ namespace Backend
             _currentSession.WalletBalance += reward;
             _currentSession.TotalBatchesProcessed++;
             _currentSession.LastBatchTime = DateTime.UtcNow;
+            
+            SavePlayerData();
 
-            LogMessage(
-                $"Batch processed: {bucketIndices.Length} balls, +{reward:F2} coins, Balance: {_currentSession.WalletBalance:F2}");
+            LogMessage($"Batch processed: {bucketIndices.Length} balls, +{reward:F2} coins, Balance: {_currentSession.WalletBalance:F2}");
 
             return new RewardResponse
             {
@@ -209,13 +236,20 @@ namespace Backend
             }
             
             if (isFullReset)
-                _currentSession.WalletBalance = 0f;
+            {
+                _playerData.FullReset();
+                DeletePlayerData();
+            }
+            else
+            {
+                _playerData.ResetSession();
+                SavePlayerData();
+            }
 
             LevelConfigServerData firstLevelConfig = _levelDatabase.GetConfig(1);
             _currentSession.CurrentBallCount = firstLevelConfig.BallAmount;
             _currentSession.CurrentLevel = firstLevelConfig.Level;
             _currentSession.TotalBallsDroppedThisLevel = 0;
-            _currentSession.LastResetTime = DateTime.UtcNow;
 
             string message = isFullReset ? "Full reset. Wallet cleared." : $"Game reset. Wallet preserved: {_currentSession.WalletBalance:F2}";
             LogMessage(message);
@@ -226,35 +260,8 @@ namespace Backend
                 BallCount = _currentSession.CurrentBallCount,
                 CurrentLevel = _currentSession.CurrentLevel,
                 WalletBalance = _currentSession.WalletBalance,
+                TimeUntilReset = SessionValidator.RESET_INTERVAL_SECONDS,
                 Message = message
-            };
-        }
-        
-        public async Task<ResetResponse> FullReset()
-        {
-            await SimulateNetworkDelay();
-
-            if (_currentSession == null)
-                return new ResetResponse { Success = false, Message = "No session" };
-
-            // Reset wallet to 0
-            _currentSession.WalletBalance = 0f;
-
-            LevelConfigServerData firstLevelConfig = _levelDatabase.GetConfig(1);
-            _currentSession.CurrentBallCount = firstLevelConfig.BallAmount;
-            _currentSession.CurrentLevel = firstLevelConfig.Level;
-            _currentSession.TotalBallsDroppedThisLevel = 0;
-            _currentSession.LastResetTime = DateTime.UtcNow;
-
-            LogMessage("Full reset. Wallet cleared.");
-
-            return new ResetResponse
-            {
-                Success = true,
-                BallCount = _currentSession.CurrentBallCount,
-                CurrentLevel = _currentSession.CurrentLevel,
-                WalletBalance = 0f,
-                Message = "Full reset complete"
             };
         }
 
@@ -279,7 +286,25 @@ namespace Backend
                 breakdown.Add(new BallResultData(ballLandData.DropNumber, ballLandData.BucketIndex, multiplier, reward));
             }
 
+            _playerData.AddHistoryEntry(breakdown);
+            SavePlayerData();
+            
             return breakdown;
+        }
+        
+        public async Task<float> AddBalance(float amount)
+        {
+            await SimulateNetworkDelay();
+    
+            if (_currentSession == null)
+                return 0f;
+    
+            _currentSession.WalletBalance += amount;
+            SavePlayerData();
+    
+            LogMessage($"Balance added: +{amount:F2}, New balance: {_currentSession.WalletBalance:F2}");
+    
+            return _currentSession.WalletBalance;
         }
 
         private async Task SimulateNetworkDelay()
@@ -287,11 +312,38 @@ namespace Backend
             int delay = Random.Range(MIN_LATENCY_MS, MAX_LATENCY_MS);
             await Task.Delay(delay);
         }
-
-        private long GetServerTimestamp()
+        
+        private void SavePlayerData()
         {
-            // Using Unix Epoch difference as a timestamp ensures the time difference between the server's system clock to the client's.
-            return (long)(DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds;
+            if (_playerData == null)
+                return;
+    
+            string json = JsonUtility.ToJson(_playerData);
+            PlayerPrefs.SetString(PLAYER_DATA_KEY, json);
+            PlayerPrefs.Save();
+    
+            LogMessage("Player data saved");
+        }
+
+        private PlayerData LoadPlayerData()
+        {
+            if (PlayerPrefs.HasKey(PLAYER_DATA_KEY))
+            {
+                string json = PlayerPrefs.GetString(PLAYER_DATA_KEY);
+                PlayerData data = JsonUtility.FromJson<PlayerData>(json);
+                LogMessage("Player data loaded");
+                return data;
+            }
+    
+            LogMessage("No saved data, creating new PlayerData");
+            return new PlayerData();
+        }
+
+        private void DeletePlayerData()
+        {
+            PlayerPrefs.DeleteKey(PLAYER_DATA_KEY);
+            PlayerPrefs.Save();
+            LogMessage("Player data deleted");
         }
 
         private void LogMessage(string message)

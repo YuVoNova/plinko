@@ -5,7 +5,7 @@ namespace Backend
 {
     public class SessionValidator
     {
-        private const float RESET_INTERVAL_SECONDS = 900f;  // 15 Minutes
+        public const float RESET_INTERVAL_SECONDS = 900f;   // 15 Minutes
         private const int MAX_BALLS_PER_BATCH = 10;
         private const float MIN_BATCH_INTERVAL = 0.1f;
         
@@ -16,17 +16,26 @@ namespace Backend
             _database = database;
         }
         
+        public bool NeedsReset(DateTime sessionStartTime)
+        {
+            return GetTimeUntilReset(sessionStartTime) <= 0;
+        }
+
         public bool NeedsReset(PlayerSession session)
         {
-            TimeSpan timeSinceReset = DateTime.UtcNow - session.LastResetTime;
-            return timeSinceReset.TotalSeconds >= RESET_INTERVAL_SECONDS;
+            return NeedsReset(session.LastResetTime);
         }
         
-        public float GetTimeUntilReset(PlayerSession session)
+        public float GetTimeUntilReset(DateTime sessionStartTime)
         {
-            TimeSpan timeSinceReset = DateTime.UtcNow - session.LastResetTime;
+            TimeSpan timeSinceReset = DateTime.UtcNow - sessionStartTime;
             float remaining = RESET_INTERVAL_SECONDS - (float)timeSinceReset.TotalSeconds;
             return Mathf.Max(0, remaining);
+        }
+
+        public float GetTimeUntilReset(PlayerSession session)
+        {
+            return GetTimeUntilReset(session.LastResetTime);
         }
         
         public bool ValidateBatchRequest(PlayerSession session, int[] bucketIndices, out string errorMessage)

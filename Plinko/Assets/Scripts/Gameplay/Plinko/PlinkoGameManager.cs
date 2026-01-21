@@ -18,6 +18,8 @@ namespace Gameplay
         public Action<float> OnTimerUpdated;
         public Action<GameState, GameState> OnStateChanged; // Old State, New State
         public Action<BallResultData> OnBallResult;
+        public Action<bool> OnBatchProcessingChanged;
+        public Action<List<BallResultData>> OnHistoryLoaded;
 
         [SerializeField] private PlinkoBoard board;
         [SerializeField] private PlinkoBallSpawner spawner;
@@ -33,10 +35,12 @@ namespace Gameplay
         private int _ballAmount;
         private int _ballsDroppedThisLevel;
         private bool _isLevelingUp = false;
+        private bool _isProcessingBatch = false;
         private float[] _currentLevelMultipliers;
         
         public int CurrentLevel => _currentLevel;
         public int CurrentBallCount => _currentBallCount;
+        public bool IsProcessingBatch => _isProcessingBatch;
 
         #region Unity Functions
 
@@ -118,6 +122,10 @@ namespace Gameplay
             ChangeState(GameState.Ready);
 
             NotifyUI(initResponse.WalletBalance);
+            OnTimerUpdated?.Invoke(initResponse.TimeUntilReset);
+    
+            if (initResponse.RewardHistory?.Count > 0)
+                OnHistoryLoaded?.Invoke(initResponse.RewardHistory);
 
             Debug.Log($"[GAME] Initialized: {_currentBallCount} balls, Level {_currentLevel}");
         }
@@ -174,6 +182,15 @@ namespace Gameplay
                 Debug.LogError($"[GAME] Failed to load level: {response.Message}");
             }
         }
+        
+        public async void AddBalance(float amount)
+        {
+            float newBalance = await backend.AddBalance(amount);
+            OnWalletUpdated?.Invoke(newBalance);
+    
+            Debug.Log($"[GAME] Balance added: +{amount:F2}, New balance: {newBalance:F2}");
+        }
+
 
         #endregion
 
@@ -222,7 +239,16 @@ namespace Gameplay
 
         private bool CanSpawn()
         {
-            return _currentState is GameState.Ready or GameState.Playing && _currentBallCount > 0;
+            if (_currentState is not (GameState.Ready or GameState.Playing))
+                return false;
+    
+            if (_isLevelingUp)
+                return false;
+    
+            if (_currentBallCount <= 0)
+                return false;
+    
+            return true;
         }
 
         #endregion
@@ -279,17 +305,14 @@ namespace Gameplay
         
         private void HandleBatchStarted()
         {
-            ChangeState(GameState.ProcessingBatch);
+            _isProcessingBatch = true;
+            OnBatchProcessingChanged?.Invoke(_isProcessingBatch);
         }
 
         private void HandleBatchCompleted()
         {
-            if (_isLevelingUp)
-                ChangeState(GameState.LevelTransition);
-            else if (spawner.IsSpawning)
-                ChangeState(GameState.Playing);
-            else
-                ChangeState(GameState.Ready);
+            _isProcessingBatch = false;
+            OnBatchProcessingChanged?.Invoke(_isProcessingBatch);
         }
 
         private void HandleBallRewardsCalculated(List<BallResultData> rewards)
@@ -430,6 +453,8 @@ namespace Gameplay
             ChangeState(GameState.Resetting);
 
             StopSpawning();
+            inputHandler?.ForceRelease();
+            
             _batchProcessor.FlushBatch();
 
             await WaitForActiveBalls();

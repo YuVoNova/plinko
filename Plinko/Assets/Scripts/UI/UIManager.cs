@@ -1,4 +1,5 @@
-﻿using Core;
+﻿using System.Collections.Generic;
+using Core;
 using Data;
 using Gameplay;
 using UnityEngine;
@@ -38,6 +39,8 @@ namespace UI
                 gameManager.OnTimerUpdated += HandleTimerUpdated;
                 gameManager.OnStateChanged += HandleStateChanged;
                 gameManager.OnBallResult += HandleBallResult;
+                gameManager.OnBatchProcessingChanged += HandleBatchProcessingChanged;
+                gameManager.OnHistoryLoaded += HandleHistoryLoaded;
             }
             
             if (devToolsDisplay)
@@ -58,6 +61,8 @@ namespace UI
                 gameManager.OnTimerUpdated -= HandleTimerUpdated;
                 gameManager.OnStateChanged -= HandleStateChanged;
                 gameManager.OnBallResult -= HandleBallResult;
+                gameManager.OnBatchProcessingChanged -= HandleBatchProcessingChanged;
+                gameManager.OnHistoryLoaded -= HandleHistoryLoaded;
             }
             
             if (devToolsDisplay)
@@ -94,15 +99,6 @@ namespace UI
         {
             devToolsDisplay?.UpdateState(newState);
             
-            if (newState == GameState.ProcessingBatch)
-            {
-                batchIndicator?.Show();
-            }
-            else if (oldState == GameState.ProcessingBatch)
-            {
-                batchIndicator?.Hide();
-            }
-            
             if (newState == GameState.LevelTransition)
             {
                 ShowLevelUpPopup();
@@ -112,6 +108,19 @@ namespace UI
         private void HandleBallResult(BallResultData ballResultData)
         {
             RecordDrop(ballResultData);
+        }
+
+        private void HandleBatchProcessingChanged(bool isProcessing)
+        {
+            if (isProcessing)
+                batchIndicator?.Show();
+            else
+                batchIndicator?.Hide();
+        }
+
+        private void HandleHistoryLoaded(List<BallResultData> history)
+        {
+            historyDisplay?.LoadHistory(history);
         }
         
         private void ShowLevelUpPopup()
@@ -144,8 +153,8 @@ namespace UI
         
         private void HandleAddBalance(float amount)
         {
-            Debug.Log($"[UI] Add balance requested: ${amount}");
-            walletDisplay?.SetBalance(walletDisplay.transform.GetComponent<WalletDisplay>() ? amount : 0);
+            Debug.Log($"[UI] Add balance requested: +${amount}");
+            gameManager?.AddBalance(amount);
         }
         
         #endregion
