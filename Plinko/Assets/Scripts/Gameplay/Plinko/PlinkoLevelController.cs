@@ -6,13 +6,13 @@ using UnityEngine;
 
 namespace Gameplay
 {
-    public class LevelController
+    public class PlinkoLevelController
     {
         public Action<int> OnLevelChanged;
         public Action OnLevelUpStarted;
         public Action OnLevelUpCompleted;
 
-        private readonly MockServerService _backend;
+        private readonly IBackendService _backend;
         private readonly PlinkoBoard _board;
 
         private int _currentLevel;
@@ -23,7 +23,7 @@ namespace Gameplay
         public int BallsRequiredForLevel => _ballsRequiredForLevel;
         public bool IsLevelingUp => _isLevelingUp;
 
-        public LevelController(MockServerService backend, PlinkoBoard board)
+        public PlinkoLevelController(IBackendService backend, PlinkoBoard board)
         {
             _backend = backend;
             _board = board;
