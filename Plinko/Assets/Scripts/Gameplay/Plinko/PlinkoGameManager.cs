@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using UnityEngine;
 using System.Threading.Tasks;
 using Backend;
 using Core;
 using Data;
+using UnityEngine;
 
 namespace Gameplay
 {
@@ -16,7 +16,7 @@ namespace Gameplay
         public Action<int> OnLevelChanged;
         public Action<float> OnWalletUpdated;
         public Action<float> OnTimerUpdated;
-        public Action<GameState, GameState> OnStateChanged; // Old State, New State
+        public Action<GameState, GameState> OnStateChanged;
         public Action<BallResultData> OnBallResult;
         public Action<bool> OnBatchProcessingChanged;
         public Action<List<BallResultData>> OnHistoryLoaded;
@@ -26,23 +26,17 @@ namespace Gameplay
         [SerializeField] private InputHandler inputHandler;
         [SerializeField] private MockServerService backend;
 
+        private SpawnController _spawnController;
+        private LevelController _levelController;
         private PlinkoBatchProcessor _batchProcessor;
         private PlinkoSessionManager _sessionManager;
 
         private GameState _currentState;
-        private int _currentBallCount;
-        private int _currentLevel;
-        private int _ballAmount;
-        private int _ballsDroppedThisLevel;
-        private bool _isLevelingUp = false;
-        private bool _isProcessingBatch = false;
-        private float[] _currentLevelMultipliers;
-        
-        public int CurrentLevel => _currentLevel;
-        public int CurrentBallCount => _currentBallCount;
-        public bool IsProcessingBatch => _isProcessingBatch;
 
-        #region Unity Functions
+        public int CurrentLevel => _levelController?.CurrentLevel ?? 0;
+        public int CurrentBallCount => _spawnController?.CurrentBallCount ?? 0;
+
+        #region Unity Lifecycle
 
         private async void Start()
         {
@@ -56,34 +50,7 @@ namespace Gameplay
 
         private void OnDestroy()
         {
-            if (inputHandler != null)
-            {
-                inputHandler.OnSpawnPressed -= StartSpawning;
-                inputHandler.OnSpawnReleased -= StopSpawning;
-            }
-
-            if (spawner != null)
-            {
-                spawner.OnBallSpawned -= HandleBallSpawned;
-                spawner.OnBallLanded -= HandleBallLanded;
-                spawner.OnBallRefunded -= HandleBallRefunded;
-            }
-
-            if (_batchProcessor != null)
-            {
-                _batchProcessor.FlushBatch();
-                _batchProcessor.OnBatchProcessed -= HandleBatchProcessed;
-                _batchProcessor.OnBatchStarted -= HandleBatchStarted;
-                _batchProcessor.OnBatchCompleted -= HandleBatchCompleted;
-                _batchProcessor.OnBallResult -= HandleBallRewardsCalculated;
-            }
-
-            if (_sessionManager != null)
-            {
-                _sessionManager.OnTimerUpdated -= OnTimerUpdated;
-                _sessionManager.OnResetNeeded -= HandleResetNeeded;
-                _sessionManager.StopMonitoring();
-            }
+            UnsubscribeAll();
         }
 
         #endregion
@@ -94,11 +61,12 @@ namespace Gameplay
         {
             ChangeState(GameState.Initializing);
 
+            InitializeControllers();
             InitializeBatchProcessor();
             InitializeSessionManager();
 
             board.InitializeBoard();
-            spawner.SetSpawnPosition(board.GetSpawnPosition());
+            _spawnController.SetSpawnPosition(board.GetSpawnPosition());
 
             InitResponse initResponse = await backend.InitializeGame();
 
@@ -108,26 +76,41 @@ namespace Gameplay
                 return;
             }
 
-            _currentBallCount = initResponse.BallCount;
-            _currentLevel = initResponse.CurrentLevel;
-            _ballsDroppedThisLevel = 0;
+            LevelLoadResult levelResult = await _levelController.LoadLevel(initResponse.CurrentLevel);
 
-            await LoadLevel(_currentLevel);
+            if (!levelResult.Success)
+            {
+                Debug.LogError("[GAME] Failed to load initial level");
+                return;
+            }
+
+            _levelController.Initialize(initResponse.CurrentLevel);
+            _spawnController.Initialize(initResponse.BallCount, levelResult.BallAmount);
 
             SetupInput();
-            SetupSpawner();
 
             _sessionManager.StartMonitoring();
 
             ChangeState(GameState.Ready);
 
-            NotifyUI(initResponse.WalletBalance);
-            OnTimerUpdated?.Invoke(initResponse.TimeUntilReset);
-    
-            if (initResponse.RewardHistory?.Count > 0)
-                OnHistoryLoaded?.Invoke(initResponse.RewardHistory);
+            NotifyUIInitialized(initResponse);
 
-            Debug.Log($"[GAME] Initialized: {_currentBallCount} balls, Level {_currentLevel}");
+            Debug.Log($"[GAME] Initialized: {initResponse.BallCount} balls, Level {initResponse.CurrentLevel}");
+        }
+
+        private void InitializeControllers()
+        {
+            _spawnController = new SpawnController(spawner);
+            _spawnController.SubscribeToSpawner();
+            _spawnController.OnBallCountChanged += HandleBallCountChanged;
+            _spawnController.OnLevelBallsComplete += HandleLevelBallsComplete;
+
+            _levelController = new LevelController(backend, board);
+            _levelController.OnLevelChanged += HandleLevelChanged;
+            _levelController.OnLevelUpStarted += HandleLevelUpStarted;
+            _levelController.OnLevelUpCompleted += HandleLevelUpCompleted;
+
+            spawner.OnBallLanded += HandleBallLanded;
         }
 
         private void InitializeBatchProcessor()
@@ -142,7 +125,7 @@ namespace Gameplay
         private void InitializeSessionManager()
         {
             _sessionManager = new PlinkoSessionManager(backend, SESSION_CHECK_INTERVAL);
-            _sessionManager.OnTimerUpdated += OnTimerUpdated;
+            _sessionManager.OnTimerUpdated += HandleTimerUpdated;
             _sessionManager.OnResetNeeded += HandleResetNeeded;
         }
 
@@ -150,47 +133,9 @@ namespace Gameplay
         {
             if (inputHandler == null) return;
 
-            inputHandler.OnSpawnPressed += StartSpawning;
-            inputHandler.OnSpawnReleased += StopSpawning;
+            inputHandler.OnSpawnPressed += HandleSpawnPressed;
+            inputHandler.OnSpawnReleased += HandleSpawnReleased;
         }
-
-        private void SetupSpawner()
-        {
-            if (spawner == null)
-                return;
-
-            spawner.OnBallLanded += HandleBallLanded;
-            spawner.OnBallSpawned += HandleBallSpawned;
-            spawner.OnBallRefunded += HandleBallRefunded;
-        }
-
-        private async Task LoadLevel(int level)
-        {
-            LevelConfigResponse response = await backend.GetLevelConfig(level);
-
-            if (response.Success && response.LevelConfig != null)
-            {
-                _ballAmount = response.BallAmount;
-                _currentLevelMultipliers = response.LevelConfig.bucketMultipliers;
-
-                board.ConfigureBucketsFromServer(response.LevelConfig);
-
-                Debug.Log($"[GAME] Level {level} loaded. | Balls for this level: {_ballAmount}");
-            }
-            else
-            {
-                Debug.LogError($"[GAME] Failed to load level: {response.Message}");
-            }
-        }
-        
-        public async void AddBalance(float amount)
-        {
-            float newBalance = await backend.AddBalance(amount);
-            OnWalletUpdated?.Invoke(newBalance);
-    
-            Debug.Log($"[GAME] Balance added: +{amount:F2}, New balance: {newBalance:F2}");
-        }
-
 
         #endregion
 
@@ -208,111 +153,98 @@ namespace Gameplay
             OnStateChanged?.Invoke(oldState, newState);
         }
 
+        private bool IsSpawnableState()
+        {
+            return _currentState is GameState.Ready or GameState.Playing;
+        }
+
         #endregion
 
-        #region Ball Spawning
+        #region Input Handlers
 
-        private void StartSpawning()
+        private void HandleSpawnPressed()
         {
-            if (!CanSpawn())
+            if (!_spawnController.CanSpawn(IsSpawnableState(), _levelController.IsLevelingUp))
                 return;
-
-            if (_currentBallCount <= 0)
-            {
-                Debug.LogWarning("[GAME] No balls remaining!");
-                return;
-            }
 
             ChangeState(GameState.Playing);
-            spawner.StartSpawning();
+            _spawnController.StartSpawning();
         }
 
-        private void StopSpawning()
+        private void HandleSpawnReleased()
         {
-            spawner.StopSpawning();
+            _spawnController.StopSpawning();
 
             if (_currentState == GameState.Playing)
-            {
                 ChangeState(GameState.Ready);
-            }
-        }
-
-        private bool CanSpawn()
-        {
-            if (_currentState is not (GameState.Ready or GameState.Playing))
-                return false;
-    
-            if (_isLevelingUp)
-                return false;
-    
-            if (_currentBallCount <= 0)
-                return false;
-    
-            return true;
         }
 
         #endregion
 
-        #region Ball Landing & Batching
+        #region Spawn Controller Handlers
 
-        private void HandleBallSpawned()
+        private void HandleBallCountChanged(int count)
         {
-            if (_currentBallCount <= 0)
-            {
-                Debug.LogError("[GAME] Spawned ball but count at 0!");
-                StopSpawning();
-                return;
-            }
-
-            _currentBallCount--;
-            _ballsDroppedThisLevel++;
-
-            Debug.Log($"[GAME] Ball spawned | Remaining: {_currentBallCount} | Progress: {_ballsDroppedThisLevel}/{_ballAmount}");
-
-            OnBallCountChanged?.Invoke(_currentBallCount);
-
-            if (_currentBallCount <= 0)
-            {
-                StopSpawning();
-                Debug.Log($"[GAME] All balls have spawned! Waiting for them to land...");
-            }
-
-            // Check if ready to level up (based on spawn count, not landing count)
-            if (_ballsDroppedThisLevel >= _ballAmount && !_isLevelingUp)
-            {
-                // Stop spawning, wait for balls to land
-                StopSpawning();
-                CheckLevelProgression();
-            }
+            OnBallCountChanged?.Invoke(count);
         }
+
+        private async void HandleLevelBallsComplete()
+        {
+            if (_levelController.IsLevelingUp)
+                return;
+
+            ChangeState(GameState.LevelTransition);
+            _spawnController.StopSpawning();
+
+            await _levelController.CheckAndProcessLevelUp(
+                _spawnController.BallsDroppedThisLevel,
+                FlushAndWaitForBalls
+            );
+        }
+
+        #endregion
+
+        #region Level Controller Handlers
+
+        private void HandleLevelChanged(int level)
+        {
+            OnLevelChanged?.Invoke(level);
+        }
+
+        private void HandleLevelUpStarted()
+        {
+            _spawnController.LockSpawning();
+        }
+
+        private void HandleLevelUpCompleted()
+        {
+            _spawnController.SetBallCount(_levelController.BallsRequiredForLevel);
+            _spawnController.SetBallsRequiredForLevel(_levelController.BallsRequiredForLevel);
+            _spawnController.UnlockSpawning();
+
+            OnBallCountChanged?.Invoke(_spawnController.CurrentBallCount);
+
+            ChangeState(GameState.Ready);
+        }
+
+        #endregion
+
+        #region Ball Landing & Batch Handlers
 
         private void HandleBallLanded(int bucketIndex)
         {
             Debug.Log($"[GAME] Ball landed in Bucket {bucketIndex}");
-
             _batchProcessor.AddBallLanding(bucketIndex);
         }
 
-        private void HandleBallRefunded()
-        {
-            _currentBallCount++;
-            _ballsDroppedThisLevel--;
-
-            Debug.Log($"[GAME] Ball refunded (out of bounds) | Remaining: {_currentBallCount} | Progress: {_ballsDroppedThisLevel}/{_ballAmount}");
-
-            OnBallCountChanged?.Invoke(_currentBallCount);
-        }
-        
         private void HandleBatchStarted()
         {
-            _isProcessingBatch = true;
-            OnBatchProcessingChanged?.Invoke(_isProcessingBatch);
+            OnBatchProcessingChanged?.Invoke(true);
         }
 
         private void HandleBatchCompleted()
         {
-            _isProcessingBatch = false;
-            OnBatchProcessingChanged?.Invoke(_isProcessingBatch);
+            OnBatchProcessingChanged?.Invoke(false);
         }
 
         private void HandleBallRewardsCalculated(List<BallResultData> rewards)
@@ -330,111 +262,22 @@ namespace Gameplay
 
         #endregion
 
-        #region Level Progression
+        #region Session Handlers
 
-        private async void CheckLevelProgression()
+        private void HandleTimerUpdated(float timeRemaining)
         {
-            if (_isLevelingUp)
-            {
-                Debug.LogWarning("[GAME] Level up already in progress, ignoring...");
-                return;
-            }
-
-            _isLevelingUp = true;
-
-            LevelProgressionResponse response = await backend.CheckLevelProgression(_ballsDroppedThisLevel);
-
-            if (response.Success && response.ShouldLevelUp)
-            {
-                await LevelUp();
-            }
-
-            _isLevelingUp = false;
+            OnTimerUpdated?.Invoke(timeRemaining);
         }
 
-        private async Task LevelUp()
+        private async void HandleResetNeeded()
         {
-            Debug.Log($"[GAME] Leveled up! Current level is {_currentLevel} with {_ballAmount} balls.");
-
-            ChangeState(GameState.LevelTransition);
-            StopSpawning();
-
-            _batchProcessor.FlushBatch();
-            await WaitForActiveBalls();
-            _batchProcessor.FlushBatch();
-
-            LevelAdvanceResponse response = await backend.AdvanceLevel();
-
-            if (!response.Success)
-            {
-                Debug.LogError($"[GAME] Level advance failed: {response.Message}");
-                ChangeState(GameState.Ready);
-                return;
-            }
-
-            _currentLevel = response.NewLevel;
-            _currentBallCount = response.NewBallAmount;
-            _ballsDroppedThisLevel = 0;
-
-            await LoadLevel(_currentLevel);
-
-            OnLevelChanged?.Invoke(_currentLevel);
-            OnBallCountChanged?.Invoke(_currentBallCount);
-
-            await Task.Delay(1000);
-
-            ChangeState(GameState.Ready);
-
-            Debug.Log($"[GAME] Advanced to level {_currentLevel} | New ball amount: {_ballAmount}");
-        }
-
-        private async Task WaitForActiveBalls()
-        {
-            const int maxWaitTime = 8000;
-            const int checkInterval = 100;
-
-            int totalWaitTime = 0;
-            int initialActive = spawner.ActiveBallCount;
-
-            if (initialActive == 0)
-            {
-                Debug.Log("[GAME] No active balls to wait for.");
-                return;
-            }
-
-            Debug.Log($"[GAME] Waiting for {initialActive} active balls...");
-
-            while (spawner.HasActiveBalls() && totalWaitTime < maxWaitTime)
-            {
-                await Task.Delay(checkInterval);
-                totalWaitTime += checkInterval;
-
-                if (totalWaitTime % 1000 == 0)
-                {
-                    Debug.Log($"[GAME] Waiting... {spawner.ActiveBallCount} balls active. (Total Wait Time: {totalWaitTime}ms)");
-                }
-            }
-
-            if (spawner.HasActiveBalls())
-            {
-                Debug.LogWarning($"[GAME] Timeout! Force clearing {spawner.ActiveBallCount} stuck balls.");
-                spawner.ResetSpawner();
-            }
-            else
-            {
-                Debug.Log($"[GAME] All balls settled in {totalWaitTime}ms.");
-            }
+            await PerformReset();
         }
 
         #endregion
 
         #region Reset
 
-        private async void HandleResetNeeded()
-        {
-            await PerformReset();
-        }
-        
         public async void ManualSessionReset()
         {
             Debug.Log("[GAME] Manual session reset triggered.");
@@ -444,7 +287,6 @@ namespace Gameplay
         public async void ManualFullReset()
         {
             Debug.Log("[GAME] Manual full reset triggered.");
-    
             await PerformReset(true);
         }
 
@@ -452,14 +294,10 @@ namespace Gameplay
         {
             ChangeState(GameState.Resetting);
 
-            StopSpawning();
+            _spawnController.StopSpawning();
             inputHandler?.ForceRelease();
-            
-            _batchProcessor.FlushBatch();
 
-            await WaitForActiveBalls();
-
-            _batchProcessor.FlushBatch();
+            await FlushAndWaitForBalls();
             _batchProcessor.Reset();
 
             _sessionManager.StopMonitoring();
@@ -473,17 +311,16 @@ namespace Gameplay
                 return;
             }
 
-            _currentBallCount = response.BallCount;
-            _currentLevel = response.CurrentLevel;
-            _ballsDroppedThisLevel = 0;
-
-            spawner.ResetSpawner();
-
-            await LoadLevel(_currentLevel);
+            _levelController.Initialize(response.CurrentLevel);
+            
+            LevelLoadResult levelResult = await _levelController.LoadLevel(response.CurrentLevel);
+            
+            _spawnController.Initialize(response.BallCount, levelResult.BallAmount);
+            _spawnController.ResetSpawner();
 
             _sessionManager.StartMonitoring();
 
-            NotifyUI(response.WalletBalance);
+            NotifyUIReset(response);
 
             ChangeState(GameState.Ready);
 
@@ -495,13 +332,130 @@ namespace Gameplay
 
         #endregion
 
+        #region Helper Methods
+
+        private async Task FlushAndWaitForBalls()
+        {
+            _batchProcessor.FlushBatch();
+            await WaitForActiveBalls();
+            _batchProcessor.FlushBatch();
+        }
+
+        private async Task WaitForActiveBalls()
+        {
+            const int maxWaitTime = 8000;
+            const int checkInterval = 100;
+
+            int totalWaitTime = 0;
+            int initialActive = _spawnController.ActiveBallCount;
+
+            if (initialActive == 0)
+            {
+                Debug.Log("[GAME] No active balls to wait for.");
+                return;
+            }
+
+            Debug.Log($"[GAME] Waiting for {initialActive} active balls...");
+
+            while (_spawnController.HasActiveBalls && totalWaitTime < maxWaitTime)
+            {
+                await Task.Delay(checkInterval);
+                totalWaitTime += checkInterval;
+
+                if (totalWaitTime % 1000 == 0)
+                    Debug.Log($"[GAME] Waiting... {_spawnController.ActiveBallCount} balls active. ({totalWaitTime}ms)");
+            }
+
+            if (_spawnController.HasActiveBalls)
+            {
+                Debug.LogWarning($"[GAME] Timeout! Force clearing {_spawnController.ActiveBallCount} stuck balls.");
+                _spawnController.ResetSpawner();
+            }
+            else
+            {
+                Debug.Log($"[GAME] All balls settled in {totalWaitTime}ms.");
+            }
+        }
+
+        #endregion
+
         #region UI Notifications
 
-        private void NotifyUI(float walletBalance)
+        private void NotifyUIInitialized(InitResponse response)
         {
-            OnBallCountChanged?.Invoke(_currentBallCount);
-            OnLevelChanged?.Invoke(_currentLevel);
-            OnWalletUpdated?.Invoke(walletBalance);
+            OnBallCountChanged?.Invoke(response.BallCount);
+            OnLevelChanged?.Invoke(response.CurrentLevel);
+            OnWalletUpdated?.Invoke(response.WalletBalance);
+            OnTimerUpdated?.Invoke(response.TimeUntilReset);
+
+            if (response.RewardHistory?.Count > 0)
+                OnHistoryLoaded?.Invoke(response.RewardHistory);
+        }
+
+        private void NotifyUIReset(ResetResponse response)
+        {
+            OnBallCountChanged?.Invoke(response.BallCount);
+            OnLevelChanged?.Invoke(response.CurrentLevel);
+            OnWalletUpdated?.Invoke(response.WalletBalance);
+        }
+
+        #endregion
+
+        #region Cleanup
+
+        private void UnsubscribeAll()
+        {
+            if (inputHandler != null)
+            {
+                inputHandler.OnSpawnPressed -= HandleSpawnPressed;
+                inputHandler.OnSpawnReleased -= HandleSpawnReleased;
+            }
+
+            if (spawner != null)
+            {
+                spawner.OnBallLanded -= HandleBallLanded;
+            }
+
+            if (_spawnController != null)
+            {
+                _spawnController.UnsubscribeFromSpawner();
+                _spawnController.OnBallCountChanged -= HandleBallCountChanged;
+                _spawnController.OnLevelBallsComplete -= HandleLevelBallsComplete;
+            }
+
+            if (_levelController != null)
+            {
+                _levelController.OnLevelChanged -= HandleLevelChanged;
+                _levelController.OnLevelUpStarted -= HandleLevelUpStarted;
+                _levelController.OnLevelUpCompleted -= HandleLevelUpCompleted;
+            }
+
+            if (_batchProcessor != null)
+            {
+                _batchProcessor.FlushBatch();
+                _batchProcessor.OnBatchProcessed -= HandleBatchProcessed;
+                _batchProcessor.OnBatchStarted -= HandleBatchStarted;
+                _batchProcessor.OnBatchCompleted -= HandleBatchCompleted;
+                _batchProcessor.OnBallResult -= HandleBallRewardsCalculated;
+            }
+
+            if (_sessionManager != null)
+            {
+                _sessionManager.OnTimerUpdated -= HandleTimerUpdated;
+                _sessionManager.OnResetNeeded -= HandleResetNeeded;
+                _sessionManager.StopMonitoring();
+            }
+        }
+
+        #endregion
+
+        #region Dev Tools
+
+        public async void AddBalance(float amount)
+        {
+            float newBalance = await backend.AddBalance(amount);
+            OnWalletUpdated?.Invoke(newBalance);
+            Debug.Log($"[GAME] Balance added: +{amount:F2}, New balance: {newBalance:F2}");
         }
 
         #endregion
