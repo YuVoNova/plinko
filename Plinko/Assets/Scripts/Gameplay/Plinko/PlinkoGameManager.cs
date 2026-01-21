@@ -26,15 +26,15 @@ namespace Gameplay
         [SerializeField] private InputHandler inputHandler;
         [SerializeField] private MockServerService backend;
 
-        private SpawnController _spawnController;
-        private LevelController _levelController;
+        private PlinkoSpawnController _plinkoSpawnController;
+        private PlinkoLevelController _plinkoLevelController;
         private PlinkoBatchProcessor _batchProcessor;
         private PlinkoSessionManager _sessionManager;
 
         private GameState _currentState;
 
-        public int CurrentLevel => _levelController?.CurrentLevel ?? 0;
-        public int CurrentBallCount => _spawnController?.CurrentBallCount ?? 0;
+        public int CurrentLevel => _plinkoLevelController?.CurrentLevel ?? 0;
+        public int CurrentBallCount => _plinkoSpawnController?.CurrentBallCount ?? 0;
 
         #region Unity Lifecycle
 
@@ -71,7 +71,7 @@ namespace Gameplay
             InitializeSessionManager();
 
             board.InitializeBoard();
-            _spawnController.SetSpawnPosition(board.GetSpawnPosition());
+            _plinkoSpawnController.SetSpawnPosition(board.GetSpawnPosition());
 
             InitResponse initResponse = await backend.InitializeGame();
 
@@ -81,7 +81,7 @@ namespace Gameplay
                 return;
             }
 
-            LevelLoadResult levelResult = await _levelController.LoadLevel(initResponse.CurrentLevel);
+            LevelLoadResult levelResult = await _plinkoLevelController.LoadLevel(initResponse.CurrentLevel);
 
             if (!levelResult.Success)
             {
@@ -89,8 +89,8 @@ namespace Gameplay
                 return;
             }
 
-            _levelController.Initialize(initResponse.CurrentLevel);
-            _spawnController.Initialize(initResponse.BallCount, levelResult.BallAmount);
+            _plinkoLevelController.Initialize(initResponse.CurrentLevel);
+            _plinkoSpawnController.Initialize(initResponse.BallCount, levelResult.BallAmount);
 
             SetupInput();
 
@@ -105,15 +105,15 @@ namespace Gameplay
 
         private void InitializeControllers()
         {
-            _spawnController = new SpawnController(spawner);
-            _spawnController.SubscribeToSpawner();
-            _spawnController.OnBallCountChanged += HandleBallCountChanged;
-            _spawnController.OnLevelBallsComplete += HandleLevelBallsComplete;
+            _plinkoSpawnController = new PlinkoSpawnController(spawner);
+            _plinkoSpawnController.SubscribeToSpawner();
+            _plinkoSpawnController.OnBallCountChanged += HandleBallCountChanged;
+            _plinkoSpawnController.OnLevelBallsComplete += HandleLevelBallsComplete;
 
-            _levelController = new LevelController(backend, board);
-            _levelController.OnLevelChanged += HandleLevelChanged;
-            _levelController.OnLevelUpStarted += HandleLevelUpStarted;
-            _levelController.OnLevelUpCompleted += HandleLevelUpCompleted;
+            _plinkoLevelController = new PlinkoLevelController(backend, board);
+            _plinkoLevelController.OnLevelChanged += HandleLevelChanged;
+            _plinkoLevelController.OnLevelUpStarted += HandleLevelUpStarted;
+            _plinkoLevelController.OnLevelUpCompleted += HandleLevelUpCompleted;
 
             spawner.OnBallLanded += HandleBallLanded;
         }
@@ -182,16 +182,16 @@ namespace Gameplay
 
         private void HandleSpawnPressed()
         {
-            if (!_spawnController.CanSpawn(IsSpawnableState(), _levelController.IsLevelingUp))
+            if (!_plinkoSpawnController.CanSpawn(IsSpawnableState(), _plinkoLevelController.IsLevelingUp))
                 return;
 
             ChangeState(GameState.Playing);
-            _spawnController.StartSpawning();
+            _plinkoSpawnController.StartSpawning();
         }
 
         private void HandleSpawnReleased()
         {
-            _spawnController.StopSpawning();
+            _plinkoSpawnController.StopSpawning();
 
             if (_currentState == GameState.Playing)
                 ChangeState(GameState.Ready);
@@ -208,14 +208,14 @@ namespace Gameplay
 
         private async void HandleLevelBallsComplete()
         {
-            if (_levelController.IsLevelingUp)
+            if (_plinkoLevelController.IsLevelingUp)
                 return;
 
             ChangeState(GameState.LevelTransition);
-            _spawnController.StopSpawning();
+            _plinkoSpawnController.StopSpawning();
 
-            await _levelController.CheckAndProcessLevelUp(
-                _spawnController.BallsDroppedThisLevel,
+            await _plinkoLevelController.CheckAndProcessLevelUp(
+                _plinkoSpawnController.BallsDroppedThisLevel,
                 FlushAndWaitForBalls
             );
         }
@@ -231,16 +231,16 @@ namespace Gameplay
 
         private void HandleLevelUpStarted()
         {
-            _spawnController.LockSpawning();
+            _plinkoSpawnController.LockSpawning();
         }
 
         private void HandleLevelUpCompleted()
         {
-            _spawnController.SetBallCount(_levelController.BallsRequiredForLevel);
-            _spawnController.SetBallsRequiredForLevel(_levelController.BallsRequiredForLevel);
-            _spawnController.UnlockSpawning();
+            _plinkoSpawnController.SetBallCount(_plinkoLevelController.BallsRequiredForLevel);
+            _plinkoSpawnController.SetBallsRequiredForLevel(_plinkoLevelController.BallsRequiredForLevel);
+            _plinkoSpawnController.UnlockSpawning();
 
-            OnBallCountChanged?.Invoke(_spawnController.CurrentBallCount);
+            OnBallCountChanged?.Invoke(_plinkoSpawnController.CurrentBallCount);
 
             ChangeState(GameState.Ready);
         }
@@ -312,7 +312,7 @@ namespace Gameplay
         {
             ChangeState(GameState.Resetting);
 
-            _spawnController.StopSpawning();
+            _plinkoSpawnController.StopSpawning();
             inputHandler?.ForceRelease();
 
             await FlushAndWaitForBalls();
@@ -329,12 +329,12 @@ namespace Gameplay
                 return;
             }
 
-            _levelController.Initialize(response.CurrentLevel);
-
-            LevelLoadResult levelResult = await _levelController.LoadLevel(response.CurrentLevel);
-
-            _spawnController.Initialize(response.BallCount, levelResult.BallAmount);
-            _spawnController.ResetSpawner();
+            _plinkoLevelController.Initialize(response.CurrentLevel);
+            
+            LevelLoadResult levelResult = await _plinkoLevelController.LoadLevel(response.CurrentLevel);
+            
+            _plinkoSpawnController.Initialize(response.BallCount, levelResult.BallAmount);
+            _plinkoSpawnController.ResetSpawner();
 
             _sessionManager.StartMonitoring();
 
@@ -365,7 +365,7 @@ namespace Gameplay
             const int checkInterval = 100;
 
             int totalWaitTime = 0;
-            int initialActive = _spawnController.ActiveBallCount;
+            int initialActive = _plinkoSpawnController.ActiveBallCount;
 
             if (initialActive == 0)
             {
@@ -375,20 +375,19 @@ namespace Gameplay
 
             Debug.Log($"[GAME] Waiting for {initialActive} active balls...");
 
-            while (_spawnController.HasActiveBalls && totalWaitTime < maxWaitTime)
+            while (_plinkoSpawnController.HasActiveBalls && totalWaitTime < maxWaitTime)
             {
                 await Task.Delay(checkInterval);
                 totalWaitTime += checkInterval;
 
                 if (totalWaitTime % 1000 == 0)
-                    Debug.Log(
-                        $"[GAME] Waiting... {_spawnController.ActiveBallCount} balls active. ({totalWaitTime}ms)");
+                    Debug.Log($"[GAME] Waiting... {_plinkoSpawnController.ActiveBallCount} balls active. ({totalWaitTime}ms)");
             }
 
-            if (_spawnController.HasActiveBalls)
+            if (_plinkoSpawnController.HasActiveBalls)
             {
-                Debug.LogWarning($"[GAME] Timeout! Force clearing {_spawnController.ActiveBallCount} stuck balls.");
-                _spawnController.ResetSpawner();
+                Debug.LogWarning($"[GAME] Timeout! Force clearing {_plinkoSpawnController.ActiveBallCount} stuck balls.");
+                _plinkoSpawnController.ResetSpawner();
             }
             else
             {
@@ -435,18 +434,18 @@ namespace Gameplay
                 spawner.OnBallLanded -= HandleBallLanded;
             }
 
-            if (_spawnController != null)
+            if (_plinkoSpawnController != null)
             {
-                _spawnController.UnsubscribeFromSpawner();
-                _spawnController.OnBallCountChanged -= HandleBallCountChanged;
-                _spawnController.OnLevelBallsComplete -= HandleLevelBallsComplete;
+                _plinkoSpawnController.UnsubscribeFromSpawner();
+                _plinkoSpawnController.OnBallCountChanged -= HandleBallCountChanged;
+                _plinkoSpawnController.OnLevelBallsComplete -= HandleLevelBallsComplete;
             }
 
-            if (_levelController != null)
+            if (_plinkoLevelController != null)
             {
-                _levelController.OnLevelChanged -= HandleLevelChanged;
-                _levelController.OnLevelUpStarted -= HandleLevelUpStarted;
-                _levelController.OnLevelUpCompleted -= HandleLevelUpCompleted;
+                _plinkoLevelController.OnLevelChanged -= HandleLevelChanged;
+                _plinkoLevelController.OnLevelUpStarted -= HandleLevelUpStarted;
+                _plinkoLevelController.OnLevelUpCompleted -= HandleLevelUpCompleted;
             }
 
             if (_batchProcessor != null)

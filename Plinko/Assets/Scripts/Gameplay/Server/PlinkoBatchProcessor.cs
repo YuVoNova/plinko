@@ -15,13 +15,13 @@ namespace Gameplay
         public Action OnBatchStarted;
         public Action OnBatchCompleted;
         public Action<List<BallResultData>> OnBallResult;
-
-        private readonly MockServerService _backend;
+        
+        private readonly IBackendService _backend;
         private readonly List<BallLandData> _pendingBallLandings = new List<BallLandData>();
         private float _lastBatchTime;
         private int _totalDroppedBallCount;
 
-        public PlinkoBatchProcessor(MockServerService backend, int totalDroppedBallCount)
+        public PlinkoBatchProcessor(IBackendService backend, int totalDroppedBallCount)
         {
             _backend = backend;
             _totalDroppedBallCount = totalDroppedBallCount;
